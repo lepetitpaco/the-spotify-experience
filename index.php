@@ -1,58 +1,103 @@
-<?php include('../login_redirect.php'); ?>
 <?php
+// This code retrieves the user's playlists from the Spotify API and stores them in an array.
+// It also handles errors if the access token cannot be retrieved or if there are no playlists found.
+// Redirect if not logged in
+include('../login_redirect.php');
 
-// PHP code to get user playlists using Spotify API
+// Debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 'On');
+
+// Load environment variables
+require './vendor/autoload.php';
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
 
 // Set up the API credentials
-// These should be stored in a separate file and not pushed to GitHub
-include('../env/api_credentials.php');
-
+$spotify_client_id = $_ENV['SPOTIFY_CLIENT_ID'];
+$spotify_client_secret = $_ENV['SPOTIFY_CLIENT_SECRET'];
+$spotify_default_user = $_ENV['SPOTIFY_DEFAULT_USER'];
 
 // Set up the API request to get the user's playlists
-$user_id = isset($_GET['id']) ? $_GET['id'] : $default_user;
+$user_id = $_GET['id'] ?? $spotify_default_user;
 $api_url = "https://api.spotify.com/v1/users/" . $user_id . "/playlists";
 
-$auth_options = array(
-    'http' => array(
+// Set up authentication options
+$auth_options = [
+    'http' => [
         'method' => 'POST',
-        'header' => 'Authorization: Basic ' . base64_encode($client_id . ':' . $client_secret),
-        'content' => http_build_query(
-            array(
-                'grant_type' => 'client_credentials'
-            )
-        )
-    )
-);
+        'header' => [
+            'Authorization: Basic ' . base64_encode($spotify_client_id . ':' . $spotify_client_secret),
+            'Content-Type: application/x-www-form-urlencoded'
+        ],
+        'content' => http_build_query([
+            'grant_type' => 'client_credentials'
+        ])
+    ]
+];
 
+// Create stream context for authentication
 $context = stream_context_create($auth_options);
+
+// Get access token from Spotify API
 $response = file_get_contents('https://accounts.spotify.com/api/token', false, $context);
 
-$access_token = json_decode($response)->access_token;
+// Check if the response is not null before decoding it
+if ($response !== null) {
+    $access_token = json_decode($response)->access_token;
+} else {
+    // Handle the error if the response is null
+    echo "Error: Unable to retrieve access token.";
+    exit();
+}
 
-$api_headers = array(
-    "Authorization: Bearer " . $access_token
-);
-
+$api_headers = [
+    "Authorization: Bearer " . $access_token,
+    "Content-Type: application/json"
+];
 
 // Get the user's playlists with pages of 50 playlists
-$playlists_infos = array();
+$playlists_infos = [];
 $next_url = $api_url . "?limit=50";
 while ($next_url) {
-    $api_response = file_get_contents($next_url, false, stream_context_create(
-        array(
-            'http' => array(
+    $api_response = file_get_contents(
+        $next_url,
+        false,
+        stream_context_create([
+            'http' => [
                 'method' => 'GET',
                 'header' => implode("\r\n", $api_headers)
-            )
-        )
-    )
+            ]
+        ])
     );
     $playlists = json_decode($api_response, true);
     $playlists_infos = array_merge($playlists_infos, $playlists['items']);
     $next_url = $playlists['next'];
 }
 
+// Handle case where no playlists are found
+if (empty($playlists_infos)) {
+    echo "No playlists found.";
+    exit();
+}
 
+// Get user's display name
+$user_id = $_GET['id'] ?? $spotify_default_user;
+$api_url = "https://api.spotify.com/v1/users/" . $user_id;
+
+$user_response = file_get_contents(
+    $api_url,
+    false,
+    stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => implode("\r\n", $api_headers)
+        ]
+    ])
+);
+
+$user_info = json_decode($user_response, true);
+$user_display_name = $user_info['display_name'] ?? $user_info['id']; // set user's display name to either the display name or the user ID
 ?>
 
 <!DOCTYPE html>
@@ -62,72 +107,18 @@ while ($next_url) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-    <title>Playlists</title>
+    <title><?php echo $user_display_name ?>'s Playlists</title>
+
     <style>
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            grid-gap: 1rem;
-            justify-items: center;
-            margin: 0 auto;
-            max-width: 1000px;
-        }
-
-        .grid-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            width: 200px;
-            opacity: 0;
-            transform: translateY(50px);
-            transition: all 0.5s ease-in-out;
-            padding: 10px;
-            z-index: 1;
-            border-radius: 15px;
-            margin: 0 auto;
-        }
-  
-
-
-        .grid-item a {
-            position: relative;
-            transition: all 0.5s ease-in-out;
-            transform: scale(1);
-            border-radius: 15px;
-            background-color: rgb(0, 255, 0, .5);
-        }
-
-        .grid-item:hover {
-            z-index: 9999;
-        }
-
-        .grid-item:hover a {
-            background-color: rgb(0, 255, 0, 1);
-            transform: scale(1.2);
-            z-index: 9999;
-        }
-
-        .grid-item img {
-            width: 100%;
-            height: auto;
-            border-radius: 15px 15px 0 0;
-        }
-
-        .grid-item.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        a {
-            color: green;
-        }
-
-        a:hover {
-            color: green;
-            text-decoration: none;
-        }
+        .grid {display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1rem; margin: 0 auto; max-width: 1000px;}
+        .grid-item {display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; width: 200px; opacity: 0; transform: translateY(50px); transition: all 0.5s ease-in-out; padding: 10px; z-index: 1; border-radius: 15px; margin: 0 auto;}
+        .grid-item a {position: relative; transition: all 0.5s ease-in-out; transform: scale(1); border-radius: 15px; background-color: rgb(0, 255, 0, .5);}
+        .grid-item:hover {z-index: 9999;}
+        .grid-item:hover a {background-color: rgb(0, 255, 0, 1); transform: scale(1.2); z-index: 9999;}
+        .grid-item img {width: 100%; height: auto; border-radius: 15px 15px 0 0;}
+        .grid-item.show {opacity: 1; transform: translateY(0);}
+        a {color: green;}
+        a:hover {color: green; text-decoration: none;}
     </style>
 </head>
 
@@ -161,13 +152,10 @@ while ($next_url) {
     </div>
 </body>
 
-
-
-
-
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/masonry/4.2.2/masonry.pkgd.min.js"></script>
+<!-- This block is responsible for Masonry layout of the playlists -->
 <script>
     $(window).on('load', function () {
         var grid = document.querySelector('.grid');
@@ -175,17 +163,13 @@ while ($next_url) {
             itemSelector: '.grid-item',
             columnWidth: '.grid-item',
         });
-        // grid.style.display = 'flex';
-        // grid.style.flexWrap = 'wrap';
-        // grid.style.justifyContent = 'center';
-        // grid.style.alignItems = 'center';
-
         var gridItems = document.querySelectorAll('.grid-item');
         gridItems.forEach(function (item) {
             item.classList.add('show');
         });
     });
 </script>
+
 </body>
 
 </html>
