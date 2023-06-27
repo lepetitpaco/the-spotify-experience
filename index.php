@@ -6,11 +6,12 @@ include('../login_redirect.php');
 
 // Debugging
 error_reporting(E_ALL);
-ini_set('display_errors', 'On');
+ini_set('display_errors', 1);
 
 // Load environment variables
-require './vendor/autoload.php';
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+require __DIR__ . '/vendor/autoload.php';
+require __DIR__.'/../../config/config.php';
+$dotenv = Dotenv\Dotenv::createImmutable(getEnvFilePath());
 $dotenv->load();
 
 // Set up the API credentials
